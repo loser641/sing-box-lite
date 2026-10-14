@@ -1,0 +1,29 @@
+{
+ "outbounds": [
+  {
+   "type": "direct"
+  }
+ ],
+ "inbounds": [
+  {
+   "type": "tuic",
+   "listen": "127.0.0.1",
+   "listen_port": 10003,
+   "users": [
+    {
+     "name": "u",
+     "uuid": "00000000-0000-0000-0000-000000000000",
+     "password": "pw1234"
+    }
+   ],
+   "tls": {
+    "enabled": true,
+    "certificate_path": "cert.pem",
+    "key_path": "key.pem",
+    "alpn": [
+     "h3"
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,167 @@
+name: track-and-build
+
+on:
+  schedule:
+    - cron: "43 18 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "强制重建（该上游版本已有 release 也继续，版本号顺延）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.track.outputs.should_build }}
+      tag: ${{ steps.track.outputs.tag }}
+      lite_tag: ${{ steps.track.outputs.lite_tag }}
+      version: ${{ steps.track.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查上游新版本
+        id: track
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: |
+          set -eu
+          TAG="$(gh api repos/SagerNet/sing-box/releases/latest --jq .tag_name)"
+          echo "上游最新版本: $TAG"
+          N="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq '.[].tag_name' | grep -c "^${TAG}-lite\." || true)"
+          N="${N:-0}"
+          SHOULD=true
+          if [ "$N" -gt 0 ] && [ "$FORCE" != "true" ]; then
+            SHOULD=false
+            echo "已存在 ${TAG}-lite.*，跳过构建"
+          fi
+          N=$((N + 1))
+          {
+            echo "should_build=${SHOULD}"
+            echo "tag=${TAG}"
+            echo "lite_tag=${TAG}-lite.${N}"
+            echo "version=${TAG#v}-lite.${N}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: track
+    if: needs.track.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+            goarm: ""
+          - arch: arm64
+            goarch: arm64
+            goarm: ""
+          - arch: armv7
+            goarch: arm
+            goarm: "7"
+    steps:
+      - uses: actions/checkout@v4
+      - name: 拉取上游源码
+        run: git clone --depth 1 --branch "${{ needs.track.outputs.tag }}" https://github.com/SagerNet/sing-box upstream
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: upstream/go.mod
+          cache: true
+          cache-dependency-path: upstream/go.sum
+      - name: 裁剪（fail-closed）
+        run: python3 trim.py upstream
+      - name: 编译
+        env:
+          CGO_ENABLED: "0"
+          VERSION: ${{ needs.track.outputs.version }}
+        run: |
+          set -eu
+          cd upstream
+          LDF="$(cat release/LDFLAGS)"
+          GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} \
+            go build -trimpath \
+              -ldflags "-X github.com/sagernet/sing-box/constant.Version=${VERSION} ${LDF} -s -w -buildid=" \
+              -tags "with_quic,with_utls,badlinkname,tfogo_checklinkname0" \
+              -o "../pkg/sing-box" ./cmd/sing-box
+          cd ..
+          OUT="sing-box-${VERSION}-linux-${{ matrix.arch }}"
+          tar -czf "${OUT}.tar.gz" -C pkg sing-box
+          sha256sum "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
+          ls -la "${OUT}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ matrix.arch }}
+          path: |
+            *.tar.gz
+            *.sha256
+
+  smoke:
+    needs: [track, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-amd64
+          path: dist
+      - name: 解出内核并生成测试证书
+        run: |
+          set -eu
+          tar -xzf dist/sing-box-*.tar.gz -C dist
+          chmod +x dist/sing-box
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+            -keyout smoke/keep/key.pem -out smoke/keep/cert.pem \
+            -days 365 -nodes -subj "/CN=www.bing.com"
+          ./dist/sing-box version
+      - name: 保留协议必须全部通过 check
+        run: |
+          set -eu
+          cd smoke/keep
+          for c in *.json; do
+            echo "== $c"
+            ../../../dist/sing-box check -c "$c"
+          done
+      - name: 裁剪掉的协议必须被拒绝
+        run: |
+          set -eu
+          cd smoke/drop
+          for c in *.json; do
+            if ../../../dist/sing-box check -c "$c" 2>&1; then
+              echo "期望被拒绝但通过了: $c"
+              exit 1
+            fi
+            echo "OK 已拒绝: $c"
+          done
+
+  release:
+    needs: [track, build, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 汇总校验和
+        run: |
+          set -eu
+          cd dist
+          rm -f *.sha256
+          sha256sum *.tar.gz > sha256sums.txt
+          cat sha256sums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.track.outputs.lite_tag }}
+          name: sing-box ${{ needs.track.outputs.version }}
+          body: |
+            跟随上游 [SagerNet/sing-box ${{ needs.track.outputs.tag }}](https://github.com/SagerNet/sing-box/releases/tag/${{ needs.track.outputs.tag }}) 自动裁剪编译的低内存版。
+
+            - 保留：vless(REALITY)、anytls、shadowsocks、tuic、hysteria2 + direct/block/selector/urltest
+            - 裁掉：vmess、trojan、socks、http、mixed、snell、naive、shadowtls、ssh、tor、tun、wireguard、tailscale、openvpn、gvisor 等
+            - 静态编译（CGO_ENABLED=0），musl/glibc 通用
+            - 请用 sha256sums.txt 校验下载文件
+          files: dist/*

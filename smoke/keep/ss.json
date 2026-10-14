@@ -1,0 +1,16 @@
+{
+ "outbounds": [
+  {
+   "type": "direct"
+  }
+ ],
+ "inbounds": [
+  {
+   "type": "shadowsocks",
+   "listen": "127.0.0.1",
+   "listen_port": 8388,
+   "method": "aes-128-gcm",
+   "password": "pass1234"
+  }
+ ]
+}

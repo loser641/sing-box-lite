@@ -1,0 +1,19 @@
+{
+ "outbounds": [
+  {
+   "type": "direct"
+  }
+ ],
+ "inbounds": [
+  {
+   "type": "vless",
+   "listen": "127.0.0.1",
+   "listen_port": 10001,
+   "users": [
+    {
+     "uuid": "00000000-0000-0000-0000-000000000000"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "outbounds": [
+  {
+   "type": "direct"
+  }
+ ],
+ "inbounds": [
+  {
+   "type": "anytls",
+   "listen": "127.0.0.1",
+   "listen_port": 10002,
+   "users": [
+    {
+     "password": "pw1234"
+    }
+   ],
+   "tls": {
+    "enabled": true,
+    "certificate_path": "cert.pem",
+    "key_path": "key.pem"
+   }
+  }
+ ]
+}
