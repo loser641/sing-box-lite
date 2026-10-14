@@ -124,14 +124,14 @@ jobs:
           cd smoke/keep
           for c in *.json; do
             echo "== $c"
-            ../../../dist/sing-box check -c "$c"
+            ../../dist/sing-box check -c "$c"
           done
       - name: 裁剪掉的协议必须被拒绝
         run: |
           set -eu
           cd smoke/drop
           for c in *.json; do
-            if ../../../dist/sing-box check -c "$c" 2>&1; then
+            if ../../dist/sing-box check -c "$c" 2>&1; then
               echo "期望被拒绝但通过了: $c"
               exit 1
             fi
