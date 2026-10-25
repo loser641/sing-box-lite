@@ -1,0 +1,14 @@
+{
+ "inbounds": [
+  {
+   "type": "http",
+   "listen": "127.0.0.1",
+   "listen_port": 10802
+  }
+ ],
+ "outbounds": [
+  {
+   "type": "direct"
+  }
+ ]
+}

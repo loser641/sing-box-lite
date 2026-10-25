@@ -55,15 +55,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux 服务端：仅入站协议（部署脚本用）
           - arch: amd64
             goarch: amd64
             goarm: ""
+            goos: linux
+            profile: server
           - arch: arm64
             goarch: arm64
             goarm: ""
+            goos: linux
+            profile: server
           - arch: armv7
             goarch: arm
             goarm: "7"
+            goos: linux
+            profile: server
+          # Windows 客户端：额外保留 socks/http/mixed/tun，必须带 gvisor（TUN 栈）
+          - arch: amd64
+            goarch: amd64
+            goarm: ""
+            goos: windows
+            profile: client
     steps:
       - uses: actions/checkout@v4
       - name: 拉取上游源码
@@ -74,30 +87,43 @@ jobs:
           cache: true
           cache-dependency-path: upstream/go.sum
       - name: 裁剪（fail-closed）
-        run: python3 trim.py upstream
+        run: python3 trim.py upstream ${{ matrix.profile }}
       - name: 编译
         env:
           CGO_ENABLED: "0"
           VERSION: ${{ needs.track.outputs.version }}
+          GOOS: ${{ matrix.goos }}
         run: |
           set -eu
+          TAGS="with_quic,with_utls,badlinkname,tfogo_checklinkname0"
+          if [ "${{ matrix.profile }}" = "client" ]; then
+            TAGS="with_gvisor,${TAGS}"
+          fi
           cd upstream
           LDF="$(cat release/LDFLAGS)"
-          GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} \
+          GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} \
             go build -trimpath \
               -ldflags "-X github.com/sagernet/sing-box/constant.Version=${VERSION} ${LDF} -s -w -buildid=" \
-              -tags "with_quic,with_utls,badlinkname,tfogo_checklinkname0" \
-              -o "../pkg/sing-box" ./cmd/sing-box
+              -tags "$TAGS" \
+              -o "../pkg/sing-box$( [ "$GOOS" = windows ] && echo .exe )" ./cmd/sing-box
           cd ..
-          OUT="sing-box-${VERSION}-linux-${{ matrix.arch }}"
-          tar -czf "${OUT}.tar.gz" -C pkg sing-box
-          sha256sum "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
-          ls -la "${OUT}.tar.gz"
+          if [ "$GOOS" = "windows" ]; then
+            OUT="sing-box-${VERSION}-windows-${{ matrix.arch }}"
+            ( cd pkg && zip -q "../${OUT}.zip" sing-box.exe )
+            ART="${OUT}.zip"
+          else
+            OUT="sing-box-${VERSION}-linux-${{ matrix.arch }}"
+            tar -czf "${OUT}.tar.gz" -C pkg sing-box
+            ART="${OUT}.tar.gz"
+          fi
+          sha256sum "$ART" > "${ART}.sha256"
+          ls -la "$ART"
       - uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ matrix.arch }}
+          name: kernel-${{ matrix.goos }}-${{ matrix.arch }}
           path: |
             *.tar.gz
+            *.zip
             *.sha256
 
   smoke:
@@ -107,9 +133,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: kernel-amd64
+          name: kernel-linux-amd64
           path: dist
-      - name: 解出内核并生成测试证书
+      - name: 解出服务端内核
         run: |
           set -eu
           tar -xzf dist/sing-box-*.tar.gz -C dist
@@ -118,7 +144,7 @@ jobs:
             -keyout smoke/keep/key.pem -out smoke/keep/cert.pem \
             -days 365 -nodes -subj "/CN=www.bing.com"
           ./dist/sing-box version
-      - name: 保留协议必须全部通过 check
+      - name: 服务端保留协议必须全部通过 check
         run: |
           set -eu
           cd smoke/keep
@@ -126,7 +152,7 @@ jobs:
             echo "== $c"
             ../../dist/sing-box check -c "$c"
           done
-      - name: 裁剪掉的协议必须被拒绝
+      - name: 服务端裁剪掉的协议必须被拒绝
         run: |
           set -eu
           cd smoke/drop
@@ -138,8 +164,52 @@ jobs:
             echo "OK 已拒绝: $c"
           done
 
+  smoke-client:
+    needs: [track, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-windows-amd64
+          path: dist
+      - name: 解出 Windows 客户端内核
+        run: |
+          set -eu
+          mkdir -p dist/win
+          unzip -q dist/sing-box-*.zip -d dist/win
+          chmod +x dist/win/sing-box.exe
+          dist/win/sing-box.exe version
+      - name: 客户端入站（socks/http/mixed/tun）必须通过
+        run: |
+          set -eu
+          cd smoke/client
+          for c in socks.json http.json mixed.json tun.json; do
+            echo "== $c"
+            ../../dist/win/sing-box.exe check -c "$c"
+          done
+      - name: 客户端出站（全部部署协议 + REALITY）必须通过
+        run: |
+          set -eu
+          cd smoke/client
+          for c in outbound-*.json; do
+            echo "== $c"
+            ../../dist/win/sing-box.exe check -c "$c"
+          done
+      - name: 客户端不应包含的协议必须被拒绝
+        run: |
+          set -eu
+          cd smoke/drop
+          for c in *.json; do
+            if ../../dist/win/sing-box.exe check -c "$c" 2>&1; then
+              echo "期望被拒绝但通过了: $c"
+              exit 1
+            fi
+            echo "OK 已拒绝: $c"
+          done
+
   release:
-    needs: [track, build, smoke]
+    needs: [track, build, smoke, smoke-client]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -151,7 +221,7 @@ jobs:
           set -eu
           cd dist
           rm -f *.sha256
-          sha256sum *.tar.gz > sha256sums.txt
+          sha256sum *.tar.gz *.zip > sha256sums.txt
           cat sha256sums.txt
       - uses: softprops/action-gh-release@v2
         with:
@@ -160,8 +230,14 @@ jobs:
           body: |
             跟随上游 [SagerNet/sing-box ${{ needs.track.outputs.tag }}](https://github.com/SagerNet/sing-box/releases/tag/${{ needs.track.outputs.tag }}) 自动裁剪编译的低内存版。
 
+            **Linux 服务端**（amd64 / arm64 / armv7，仅入站协议，配合 [singbox-deploy](https://github.com/loser641/singbox-deploy)）
             - 保留：vless(REALITY)、anytls、shadowsocks、tuic、hysteria2 + direct/block/selector/urltest
             - 裁掉：vmess、trojan、socks、http、mixed、snell、naive、shadowtls、ssh、tor、tun、wireguard、tailscale、openvpn、gvisor 等
-            - 静态编译（CGO_ENABLED=0），musl/glibc 通用
+
+            **Windows 客户端**（amd64，可当 TUN 客户端内核）
+            - 额外保留：socks、http、mixed、tun（gvisor 栈）
+            - 同样裁掉用不到的协议，体积约 42MB（官方约 78MB）
+
+            - 静态编译（CGO_ENABLED=0），Linux 包 musl/glibc 通用
             - 请用 sha256sums.txt 校验下载文件
           files: dist/*
