@@ -166,7 +166,7 @@ jobs:
 
   smoke-client:
     needs: [track, build]
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -174,13 +174,14 @@ jobs:
           name: kernel-windows-amd64
           path: dist
       - name: 解出 Windows 客户端内核
+        shell: bash
         run: |
           set -eu
           mkdir -p dist/win
           unzip -q dist/sing-box-*.zip -d dist/win
-          chmod +x dist/win/sing-box.exe
-          dist/win/sing-box.exe version
+          ./dist/win/sing-box.exe version
       - name: 客户端入站（socks/http/mixed/tun）必须通过
+        shell: bash
         run: |
           set -eu
           cd smoke/client
@@ -189,6 +190,7 @@ jobs:
             ../../dist/win/sing-box.exe check -c "$c"
           done
       - name: 客户端出站（全部部署协议 + REALITY）必须通过
+        shell: bash
         run: |
           set -eu
           cd smoke/client
@@ -197,6 +199,7 @@ jobs:
             ../../dist/win/sing-box.exe check -c "$c"
           done
       - name: 客户端不应包含的协议必须被拒绝
+        shell: bash
         run: |
           set -eu
           cd smoke/drop
