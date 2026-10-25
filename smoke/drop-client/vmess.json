@@ -1,0 +1,19 @@
+{
+ "outbounds": [
+  {
+   "type": "direct"
+  }
+ ],
+ "inbounds": [
+  {
+   "type": "vmess",
+   "listen": "127.0.0.1",
+   "listen_port": 20001,
+   "users": [
+    {
+     "uuid": "00000000-0000-0000-0000-000000000000"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "outbounds": [
+  {
+   "type": "direct"
+  }
+ ],
+ "inbounds": [
+  {
+   "type": "snell",
+   "listen": "127.0.0.1",
+   "listen_port": 20004,
+   "psk": "pw"
+  }
+ ]
+}

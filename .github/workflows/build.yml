@@ -202,7 +202,7 @@ jobs:
         shell: bash
         run: |
           set -eu
-          cd smoke/drop
+          cd smoke/drop-client
           for c in *.json; do
             if ../../dist/win/sing-box.exe check -c "$c" 2>&1; then
               echo "期望被拒绝但通过了: $c"
