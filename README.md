@@ -53,7 +53,7 @@ SB_KERNEL=lite sh -c "$(wget -qO- https://github.com/loser641/singbox-deploy/raw
 
 ```sh
 git clone --depth 1 --branch vX.Y.Z https://github.com/SagerNet/sing-box
-python3 trim.py sing-box
+python3 trim.py sing-box server   # Windows 客户端用 client
 cd sing-box
 LDF="$(cat release/LDFLAGS)"
 CGO_ENABLED=0 go build -trimpath \
@@ -61,6 +61,8 @@ CGO_ENABLED=0 go build -trimpath \
   -tags "with_quic,with_utls,badlinkname,tfogo_checklinkname0" \
   -o sing-box ./cmd/sing-box
 ```
+
+Windows 客户端版：`GOOS=windows`，tags 追加 `with_gvisor`（TUN 的 gvisor 栈，不加会在运行时拒绝启动 TUN），产物为 `sing-box.exe`，打包成 zip。
 
 裁剪全部由 [`trim.py`](trim.py) 完成（清单在文件头部），本仓库不含上游源码副本；源码以 GPL-3.0 从上游获取，修改内容即 trim.py 与构建工作流。
 
