@@ -22,13 +22,24 @@ sing-box 低内存 / 小体积定制构建（**非官方**，与 SagerNet 无关
 - 基础：`direct`、`block`、`selector`/`urltest`、DNS 全套（local/hosts/fakeip/https/quic 等）
 - 构建标签：`with_quic`、`with_utls`
 
-**裁掉**：vmess、trojan、socks、http、mixed、snell、naive、shadowtls、ssh、tor、tun/redirect/tproxy、wireguard、tailscale、openvpn、openconnect、cloudflared、gvisor、clash api、usbip、内置 acme 等。
+**裁掉**（两个 profile 都裁）：vmess、trojan、snell、naive、shadowtls、ssh、tor、redirect/tproxy、wireguard、tailscale、openvpn、openconnect、cloudflared、clash api、usbip、内置 acme 等。
+
+**Windows 客户端 profile** 额外保留 `socks` / `http` / `mixed` / `tun` 并启用 `with_gvisor`，因此可作桌面客户端内核。两套清单在 `trim.py` 里分别为 `server` / `client` 两个 profile，CI 分别编译、分别冒烟。
 
 配置里用到被裁掉的协议时会明确报错：`unknown inbound type: vmess`，不会静默失效。
 
 ## 下载
 
-Releases 页面提供 `sing-box-<版本>-linux-<架构>.tar.gz`（amd64 / arm64 / armv7），包内是名为 `sing-box` 的静态二进制，musl（Alpine）和 glibc 通用。请用 `sha256sums.txt` 校验。
+Releases 页面提供两类产物：
+
+| 包 | 用途 | 保留 |
+|---|---|---|
+| `sing-box-<版本>-linux-<arch>.tar.gz`<br>（amd64 / arm64 / armv7） | **Linux 服务端**，配合 [singbox-deploy](https://github.com/loser641/singbox-deploy) | vless(REALITY)、anytls、shadowsocks、tuic、hysteria2 + direct/block/group |
+| `sing-box-<版本>-windows-amd64.zip` | **Windows 客户端**，可作 TUN 客户端内核 | 额外保留 socks / http / mixed / tun（gvisor 栈）+ 上述全部出站协议 |
+
+包内是静态二进制（`CGO_ENABLED=0`），Linux 包 musl（Alpine）与 glibc 通用。请用 `sha256sums.txt` 校验。
+
+> 为什么 Windows 版单独保留 socks/http/mixed/tun：服务端用不到这些，但客户端必须有本地代理入口才能用；TUN 的 gvisor 栈需要 `with_gvisor` 编译标签，实测不加该标签运行时直接报 `gVisor is not included in this build`。
 
 ## 配合 singbox-deploy 使用
 
@@ -42,7 +53,7 @@ SB_KERNEL=lite sh -c "$(wget -qO- https://github.com/loser641/singbox-deploy/raw
 
 `.github/workflows/build.yml` 每天检查上游 release：
 
-1. 上游发新版 → 自动裁剪、编译（amd64/arm64/armv7）→ 冒烟测试 → 发布 `vX.Y.Z-lite.N`
+1. 上游发新版 → 自动裁剪、编译（Linux amd64/arm64/armv7 + Windows amd64）→ 冒烟测试 → 发布 `vX.Y.Z-lite.N`
 2. 冒烟测试：5 种保留协议的配置必须全部通过 `sing-box check`，被裁协议的配置必须被拒绝
 3. 上游新增协议/注册点时，`trim.py` 会 **fail-closed** 报错并停住构建（不会静默编出错东西），维护者更新清单后放行
 4. 遇到安全补丁可在 Actions 页手动触发（可选「强制重建」）
